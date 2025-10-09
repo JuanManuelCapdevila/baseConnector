@@ -1,0 +1,22 @@
+{
+  "name": "baseconnector",
+  "version": "1.0.0",
+  "description": "conector de fuentes externas para Janus",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JuanManuelCapdevila/BaseConnectorJanus.git"
+  },
+  "keywords": [
+    "connector"
+  ],
+  "author": "Juan Manuel Capdevila",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/JuanManuelCapdevila/BaseConnectorJanus/issues"
+  },
+  "homepage": "https://github.com/JuanManuelCapdevila/BaseConnectorJanus#readme"
+}
