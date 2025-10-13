@@ -1,0 +1,74 @@
+{
+  "sources": [
+    {
+      "name": "example-mikrowisp",
+      "type": "mikrowisp",
+      "enabled": false,
+      "url": "https://api.mikrowisp.example.com",
+      "interval": 300000,
+      "auth": {
+        "type": "bearer",
+        "token": "YOUR_TOKEN_HERE"
+      },
+      "kafkaTopic": "connector.mikrowisp.customers",
+      "mapping": {
+        "customerId": "id",
+        "customerName": "name",
+        "email": "email"
+      }
+    },
+    {
+      "name": "example-chatwoot",
+      "type": "chatwoot",
+      "enabled": false,
+      "url": "https://app.chatwoot.com/api/v1",
+      "interval": 60000,
+      "auth": {
+        "type": "apikey",
+        "apiKey": "YOUR_API_KEY_HERE",
+        "headerName": "api_access_token"
+      },
+      "kafkaTopic": "connector.chatwoot.conversations",
+      "mapping": {
+        "conversationId": "id",
+        "status": "status",
+        "messages": "messages"
+      }
+    },
+    {
+      "name": "example-smartolt",
+      "type": "smartOLT",
+      "enabled": false,
+      "url": "https://api.smartolt.example.com",
+      "interval": 120000,
+      "auth": {
+        "type": "basic",
+        "username": "admin",
+        "password": "YOUR_PASSWORD_HERE"
+      },
+      "kafkaTopic": "connector.smartolt.devices",
+      "mapping": {
+        "deviceId": "id",
+        "deviceName": "name",
+        "status": "online_status"
+      }
+    },
+    {
+      "name": "example-google",
+      "type": "google",
+      "enabled": false,
+      "url": "https://www.googleapis.com",
+      "interval": 3600000,
+      "auth": {
+        "type": "bearer",
+        "token": "YOUR_GOOGLE_TOKEN_HERE"
+      },
+      "kafkaTopic": "connector.google.data",
+      "mapping": {
+        "id": "id",
+        "name": "displayName",
+        "email": "primaryEmail"
+      }
+    }
+  ]
+}
