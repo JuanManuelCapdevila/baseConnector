@@ -1,0 +1,15 @@
+{
+  "clientId": "base-connector",
+  "brokers": ["localhost:9092"],
+  "logLevel": "INFO",
+  "retry": {
+    "initialRetryTime": 300,
+    "retries": 8
+  },
+  "producer": {
+    "partitioner": "legacy",
+    "maxInFlightRequests": 5,
+    "idempotent": true,
+    "transactionalId": null
+  }
+}
