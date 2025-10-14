@@ -21,19 +21,19 @@
       "name": "example-chatwoot",
       "type": "chatwoot",
       "enabled": false,
-      "url": "https://app.chatwoot.com/api/v1",
+      "url": "https://app.chatwoot.com",
       "interval": 60000,
+      "accountId": 1,
+      "status": "open",
+      "assigneeType": "all",
+      "inboxId": null,
+      "teamId": null,
+      "labels": [],
       "auth": {
-        "type": "apikey",
-        "apiKey": "YOUR_API_KEY_HERE",
-        "headerName": "api_access_token"
+        "apiKey": "YOUR_API_ACCESS_TOKEN_HERE"
       },
       "kafkaTopic": "connector.chatwoot.conversations",
-      "mapping": {
-        "conversationId": "id",
-        "status": "status",
-        "messages": "messages"
-      }
+      "mapping": null
     },
     {
       "name": "example-smartolt",
