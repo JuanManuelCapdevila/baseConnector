@@ -1,5 +1,7 @@
 // utils/dataFormatter.js
 const logger = require('../core/logger');
+const { Observable, of, from, throwError } = require('rxjs');
+const { catchError, map } = require('rxjs/operators');
 
 class DataFormatter {
   constructor() {
@@ -28,14 +30,14 @@ class DataFormatter {
   }
 
   /**
-   * Formatea datos en un formato estándar para Kafka
+   * Formatea datos en un formato estï¿½ndar para Kafka
    * @param {Object} data - Datos a formatear
    * @param {string} source - Nombre de la fuente
    * @param {string} type - Tipo de dato
    * @param {Object} options - Opciones adicionales { schemaId, subject }
-   * @returns {Promise<Object>}
+   * @returns {Observable<Object>}
    */
-  async formatForKafka(data, source, type, options = {}) {
+  formatForKafka(data, source, type, options = {}) {
     const message = {
       metadata: {
         source,
@@ -48,51 +50,51 @@ class DataFormatter {
 
     // Si usamos Schema Registry, codificar el mensaje
     if (this.useSchemaRegistry && this.schemaRegistryClient) {
-      try {
-        const subject = options.subject || `${source}-${type}-value`;
-        const encodedPayload = await this.schemaRegistryClient.encode(
-          options.schemaId || subject,
-          message
-        );
-        return encodedPayload;
-      } catch (error) {
-        logger.error(`Error codificando con Schema Registry: ${error.message}`);
-        logger.warn('Enviando mensaje sin codificar');
-      }
+      const subject = options.subject || `${source}-${type}-value`;
+      return from(this.schemaRegistryClient.encode(options.schemaId || subject, message)).pipe(
+        catchError(error => {
+          logger.error(`Error codificando con Schema Registry: ${error.message}`);
+          logger.warn('Enviando mensaje sin codificar como fallback.');
+          // Si falla la codificaciÃ³n, devolvemos el mensaje original sin codificar.
+          // `of` crea un Observable que emite el valor y completa.
+          return of(message);
+        })
+      );
     }
 
-    return message;
+    return of(message);
   }
 
   /**
    * Decodifica un mensaje usando Schema Registry
    * @param {Buffer} encodedMessage - Mensaje codificado
-   * @returns {Promise<Object>}
+   * @returns {Observable<Object>}
    */
-  async decodeFromKafka(encodedMessage) {
+  decodeFromKafka(encodedMessage) {
     if (this.useSchemaRegistry && this.schemaRegistryClient) {
-      try {
-        return await this.schemaRegistryClient.decode(encodedMessage);
-      } catch (error) {
-        logger.error(`Error decodificando con Schema Registry: ${error.message}`);
-        throw error;
-      }
+      return from(this.schemaRegistryClient.decode(encodedMessage)).pipe(
+        catchError(error => {
+          logger.error(`Error decodificando con Schema Registry: ${error.message}`);
+          return throwError(() => error);
+        })
+      );
     }
 
     // Si no hay Schema Registry, intentar parsear como JSON
     try {
-      return JSON.parse(encodedMessage.toString());
+      const parsed = JSON.parse(encodedMessage.toString());
+      return of(parsed);
     } catch (error) {
       logger.error(`Error parseando mensaje: ${error.message}`);
-      throw error;
+      return throwError(() => error);
     }
   }
 
   /**
-   * Normaliza datos de diferentes fuentes a un formato común
-   * Soporta múltiples tipos de mapeo:
+   * Normaliza datos de diferentes fuentes a un formato comï¿½n
+   * Soporta mï¿½ltiples tipos de mapeo:
    * - String: acceso directo o dot notation ("user.name")
-   * - Function: transformación custom ((data) => data.user.name.toUpperCase())
+   * - Function: transformaciï¿½n custom ((data) => data.user.name.toUpperCase())
    * - Object: mapeo complejo con defaultValue, transform, required
    *
    * @param {Object|Array} rawData - Datos crudos (puede ser objeto o array)
@@ -103,7 +105,7 @@ class DataFormatter {
    * // Mapeo simple con dot notation
    * schema = { userName: 'user.name', userId: 'user.id' }
    *
-   * // Mapeo con función custom
+   * // Mapeo con funciï¿½n custom
    * schema = { userName: (data) => data.user.name.toUpperCase() }
    *
    * // Mapeo complejo
@@ -118,7 +120,7 @@ class DataFormatter {
    */
   normalize(rawData, schema) {
     if (!schema || typeof schema !== 'object') {
-      logger.warn('No se proporcionó schema para normalización, devolviendo datos originales');
+      logger.warn('No se proporcionï¿½ schema para normalizaciï¿½n, devolviendo datos originales');
       return rawData;
     }
 
@@ -145,7 +147,7 @@ class DataFormatter {
         if (typeof mapping === 'string') {
           value = this.getNestedValue(rawData, mapping);
         }
-        // Mapeo con función custom
+        // Mapeo con funciï¿½n custom
         else if (typeof mapping === 'function') {
           value = mapping(rawData);
         }
@@ -157,7 +159,7 @@ class DataFormatter {
 
           value = sourceValue;
 
-          // Aplicar transformación si existe
+          // Aplicar transformaciï¿½n si existe
           if (mapping.transform && typeof mapping.transform === 'function') {
             value = mapping.transform(value, rawData);
           }
@@ -204,9 +206,9 @@ class DataFormatter {
   }
 
   /**
-   * Limpia datos eliminando campos nulos, undefined o vacíos
+   * Limpia datos eliminando campos nulos, undefined o vacï¿½os
    * @param {Object} data - Datos a limpiar
-   * @param {boolean} removeEmpty - Si eliminar strings vacíos
+   * @param {boolean} removeEmpty - Si eliminar strings vacï¿½os
    * @returns {Object}
    */
   clean(data, removeEmpty = true) {
@@ -261,14 +263,14 @@ class DataFormatter {
   }
 
   /**
-   * Transforma un array de datos aplicando una función a cada elemento
+   * Transforma un array de datos aplicando una funciï¿½n a cada elemento
    * @param {Array} dataArray - Array de datos
-   * @param {Function} transformFn - Función de transformación
+   * @param {Function} transformFn - Funciï¿½n de transformaciï¿½n
    * @returns {Array}
    */
   transformArray(dataArray, transformFn) {
     if (!Array.isArray(dataArray)) {
-      logger.warn('transformArray esperaba un array pero recibió:', typeof dataArray);
+      logger.warn('transformArray esperaba un array pero recibiï¿½:', typeof dataArray);
       return [];
     }
 

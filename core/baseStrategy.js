@@ -3,19 +3,21 @@ const logger = require('./logger');
 const errorHandler = require('../utils/errorHandler');
 const httpClient = require('../utils/httpClient');
 const dataFormatter = require('../utils/dataFormatter');
+const { of, from, throwError, EMPTY } = require('rxjs');
+const { switchMap, map, tap, catchError, finalize } = require('rxjs/operators');
 
 /**
- * Clase base abstracta para todas las estrategias de extracción de datos
- * Cada fuente externa debe extender esta clase e implementar los métodos abstractos
+ * Clase base abstracta para todas las estrategias de extracciï¿½n de datos
+ * Cada fuente externa debe extender esta clase e implementar los mï¿½todos abstractos
  */
 class BaseStrategy {
   /**
-   * @param {Object} config - Configuración de la fuente
+   * @param {Object} config - Configuraciï¿½n de la fuente
    * @param {string} config.name - Nombre de la fuente
    * @param {string} config.type - Tipo de estrategia
    * @param {string} config.url - URL base del API
-   * @param {Object} config.auth - Configuración de autenticación
-   * @param {number} config.interval - Intervalo de ejecución en ms
+   * @param {Object} config.auth - Configuraciï¿½n de autenticaciï¿½n
+   * @param {number} config.interval - Intervalo de ejecuciï¿½n en ms
    * @param {Object} config.mapping - Schema de mapeo de datos
    */
   constructor(config) {
@@ -33,109 +35,109 @@ class BaseStrategy {
   }
 
   /**
-   * Método abstracto: Debe ser implementado por cada estrategia
+   * Mï¿½todo abstracto: Debe ser implementado por cada estrategia
    * Extrae datos de la fuente externa
-   * @returns {Promise<Array|Object>}
+   * @returns {Observable<Array|Object>}
    */
-  async extract() {
-    throw new Error(`El método extract() debe ser implementado en ${this.constructor.name}`);
+  extract() {
+    throw new Error(`El mï¿½todo extract() debe ser implementado en ${this.constructor.name}`);
   }
 
   /**
-   * Método abstracto: Debe ser implementado por cada estrategia
-   * Transforma los datos extraídos al formato deseado
-   * @param {*} rawData - Datos crudos extraídos
-   * @returns {Promise<Array|Object>}
+   * Mï¿½todo abstracto: Debe ser implementado por cada estrategia
+   * Transforma los datos extraï¿½dos al formato deseado
+   * @param {*} rawData - Datos crudos extraï¿½dos
+   * @returns {Array|Object}
    */
-  async transform(rawData) {
-    throw new Error(`El método transform() debe ser implementado en ${this.constructor.name}`);
+  transform(rawData) {
+    throw new Error(`El mï¿½todo transform() debe ser implementado en ${this.constructor.name}`);
   }
 
   /**
-   * Método del ciclo ETL completo: Extract -> Transform -> Load (via Kafka)
-   * Este método orquesta todo el proceso y maneja errores
+   * Mï¿½todo del ciclo ETL completo: Extract -> Transform -> Load (via Kafka)
+   * Este mï¿½todo orquesta todo el proceso y maneja errores
    * @param {Object} kafkaPublisher - Instancia del publicador de Kafka
-   * @returns {Promise<Object>}
+   * @returns {Observable<Object>}
    */
-  async execute(kafkaPublisher) {
+  execute(kafkaPublisher) {
     if (this.isRunning) {
-      logger.warn(`[${this.name}] Ejecución en progreso, saltando esta iteración`);
-      return { skipped: true, reason: 'Ejecución en progreso' };
+      logger.warn(`[${this.name}] Ejecuciï¿½n en progreso, saltando esta iteraciï¿½n`);
+      return of({ skipped: true, reason: 'Ejecucin en progreso' });
     }
 
-    this.isRunning = true;
     const startTime = Date.now();
 
-    try {
-      logger.info(`[${this.name}] Iniciando extracción de datos`);
+    return of(undefined).pipe(
+      tap(() => {
+        this.isRunning = true;
+        logger.info(`[${this.name}] Iniciando extraccin de datos`);
+      }),
+      // 1. Extract
+      switchMap(() => from(this.extract())), // `from` convierte Promise a Observable si es necesario
+      switchMap(rawData => {
+        if (!rawData || (Array.isArray(rawData) && rawData.length === 0)) {
+          logger.info(`[${this.name}] No hay datos para procesar`);
+          return of({ success: true, recordsProcessed: 0, duration: Date.now() - startTime });
+        }
 
-      // 1. Extract: Obtener datos de la fuente
-      const rawData = await this.extract();
+        // 2. Transform
+        const transformedData = this.transform(rawData);
 
-      if (!rawData || (Array.isArray(rawData) && rawData.length === 0)) {
-        logger.info(`[${this.name}] No hay datos para procesar`);
-        return { success: true, recordsProcessed: 0 };
-      }
-
-      // 2. Transform: Transformar datos
-      const transformedData = await this.transform(rawData);
-
-      // 3. Load: Publicar a Kafka
-      const topic = this.config.kafkaTopic || `connector.${this.type}.${this.name}`;
-      await kafkaPublisher.publish(topic, transformedData, {
-        source: this.name,
-        type: this.type
-      });
-
-      const duration = Date.now() - startTime;
-      const recordCount = Array.isArray(transformedData) ? transformedData.length : 1;
-
-      logger.info(`[${this.name}] Ejecución exitosa: ${recordCount} registros en ${duration}ms`);
-
-      this.lastExecution = new Date();
-      this.lastError = null;
-      this.executionCount++;
-
-      return {
-        success: true,
-        recordsProcessed: recordCount,
-        duration
-      };
-    } catch (error) {
-      const duration = Date.now() - startTime;
-      this.lastError = errorHandler.handleStrategyError(error, this.constructor.name, this.name);
-
-      return {
-        success: false,
-        error: this.lastError,
-        duration
-      };
-    } finally {
-      this.isRunning = false;
-    }
+        // 3. Load
+        const topic = this.config.kafkaTopic || `connector.${this.type}.${this.name}`;
+        return kafkaPublisher.publish(topic, transformedData, {
+          source: this.name,
+          type: this.type
+        }).pipe(
+          map(() => {
+            const duration = Date.now() - startTime;
+            const recordCount = Array.isArray(transformedData) ? transformedData.length : 1;
+            return { success: true, recordsProcessed: recordCount, duration };
+          })
+        );
+      }),
+      tap(result => {
+        if (result.success) {
+          this.lastExecution = new Date();
+          this.lastError = null;
+          this.executionCount++;
+        }
+      }),
+      catchError(error => {
+        const duration = Date.now() - startTime;
+        this.lastError = errorHandler.handleStrategyError(error, this.constructor.name, this.name);
+        const errorResult = { success: false, error: this.lastError, duration };
+        // Devolvemos un observable que emite el error y completa, para no romper la cadena del scheduler
+        return of(errorResult);
+      }),
+      finalize(() => {
+        this.isRunning = false;
+      })
+    );
   }
 
   /**
-   * Método helper para hacer peticiones HTTP autenticadas
+   * Mï¿½todo helper para hacer peticiones HTTP autenticadas
    * @param {string} endpoint - Endpoint a consumir (relativo a la URL base)
-   * @param {Object} options - Opciones adicionales de la petición
-   * @returns {Promise<Object>}
+   * @param {Object} options - Opciones adicionales de la peticiï¿½n
+   * @returns {Observable<Object>}
    */
-  async makeRequest(endpoint, options = {}) {
+  makeRequest(endpoint, options = {}) {
     const url = `${this.config.url}${endpoint}`;
-    const config = {
+    const requestConfig = {
       ...options,
       headers: {
         ...this.getAuthHeaders(),
         ...options.headers
-      }
+      },
+      url
     };
 
-    return httpClient.request({ ...config, url });
+    return httpClient.request(requestConfig);
   }
 
   /**
-   * Obtiene los headers de autenticación según la configuración
+   * Obtiene los headers de autenticaciï¿½n segï¿½n la configuraciï¿½n
    * @returns {Object}
    */
   getAuthHeaders() {
@@ -157,7 +159,7 @@ class BaseStrategy {
         return { Authorization: `Basic ${credentials}` };
 
       default:
-        logger.warn(`[${this.name}] Tipo de autenticación no soportado: ${auth.type}`);
+        logger.warn(`[${this.name}] Tipo de autenticaciï¿½n no soportado: ${auth.type}`);
         return {};
     }
   }
@@ -185,7 +187,7 @@ class BaseStrategy {
     const validation = dataFormatter.validate(data, requiredFields);
 
     if (!validation.valid) {
-      logger.warn(`[${this.name}] Validación fallida. Campos faltantes: ${validation.missing.join(', ')}`);
+      logger.warn(`[${this.name}] Validaciï¿½n fallida. Campos faltantes: ${validation.missing.join(', ')}`);
     }
 
     return validation.valid;

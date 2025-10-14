@@ -1,5 +1,7 @@
 // utils/httpClient.js
 const axios = require('axios');
+const { defer, from, throwError, timer } = require('rxjs');
+const { map, retry, catchError, tap } = require('rxjs/operators');
 const logger = require('../core/logger');
 const errorHandler = require('./errorHandler');
 
@@ -11,55 +13,56 @@ class HttpClient {
   }
 
   /**
-   * Realiza una petición HTTP con reintentos automáticos
-   * @param {Object} config - Configuración de axios
-   * @param {number} retryCount - Contador de reintentos
-   * @returns {Promise<Object>}
+   * Realiza una peticiï¿½n HTTP con reintentos automï¿½ticos
+   * @param {Object} config - Configuraciï¿½n de axios
+   * @returns {Observable<Object>}
    */
-  async request(config, retryCount = 0) {
-    const finalConfig = {
-      timeout: this.defaultTimeout,
-      ...config
-    };
-
-    try {
-      logger.debug(`HTTP ${config.method?.toUpperCase() || 'GET'} ${config.url}`);
-      const response = await axios(finalConfig);
-
-      if (retryCount > 0) {
-        logger.info(`Petición exitosa después de ${retryCount} reintentos: ${config.url}`);
-      }
-
-      return response.data;
-    } catch (error) {
-      const shouldRetry = this.shouldRetry(error, retryCount);
-
-      if (shouldRetry) {
-        const delay = this.calculateBackoff(retryCount);
-        logger.warn(`Reintentando petición (${retryCount + 1}/${this.maxRetries}) en ${delay}ms: ${config.url}`);
-
-        await this.sleep(delay);
-        return this.request(config, retryCount + 1);
-      }
-
-      const httpError = errorHandler.createHttpError(
-        error.response?.status || 500,
-        error.message
-      );
-      httpError.originalError = error;
-
-      throw httpError;
-    }
+  request(config) {
+    // `defer` asegura que la llamada a axios se haga solo al momento de la suscripciÃ³n
+    return defer(() => {
+      const finalConfig = {
+        timeout: this.defaultTimeout,
+        ...config
+      };
+      logger.debug(`HTTP ${finalConfig.method?.toUpperCase() || 'GET'} ${finalConfig.url}`);
+      // `from` convierte la promesa de axios en un Observable
+      return from(axios(finalConfig));
+    }).pipe(
+      map(response => response.data), // Extraemos solo los datos de la respuesta
+      retry({
+        count: this.maxRetries,
+        delay: (error, retryCount) => {
+          // `retry` nos da el control para decidir si reintentar y con quÃ© demora
+          if (!this.shouldRetry(error, retryCount)) {
+            // Si no debemos reintentar, lanzamos el error para que lo capture `catchError`
+            return throwError(() => error);
+          }
+          const delay = this.calculateBackoff(retryCount - 1);
+          logger.warn(`Reintentando peticiÃ³n (${retryCount}/${this.maxRetries}) en ${delay}ms: ${config.url}`);
+          return timer(delay);
+        }
+      }),
+      catchError(error => {
+        // Centralizamos el manejo de errores aquÃ­
+        const httpError = errorHandler.createHttpError(
+          error.response?.status || 500,
+          error.message
+        );
+        httpError.originalError = error;
+        // Lanzamos un nuevo error formateado para que lo consuman las estrategias
+        return throwError(() => httpError);
+      })
+    );
   }
 
   /**
-   * Determina si se debe reintentar la petición
-   * @param {Error} error - Error de la petición
-   * @param {number} retryCount - Número de reintentos realizados
+   * Determina si se debe reintentar la peticiï¿½n
+   * @param {Error} error - Error de la peticiï¿½n
+   * @param {number} retryCount - Nï¿½mero de reintentos realizados
    * @returns {boolean}
    */
   shouldRetry(error, retryCount) {
-    if (retryCount >= this.maxRetries) {
+    if (retryCount + 1 >= this.maxRetries) {
       return false;
     }
 
@@ -75,7 +78,7 @@ class HttpClient {
 
   /**
    * Calcula el tiempo de espera con backoff exponencial
-   * @param {number} retryCount - Número de reintentos realizados
+   * @param {number} retryCount - Nï¿½mero de reintentos realizados
    * @returns {number}
    */
   calculateBackoff(retryCount) {
@@ -83,53 +86,44 @@ class HttpClient {
   }
 
   /**
-   * Espera un tiempo determinado
-   * @param {number} ms - Milisegundos a esperar
-   * @returns {Promise<void>}
-   */
-  sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  /**
-   * Realiza una petición GET
+   * Realiza una peticiï¿½n GET
    * @param {string} url - URL del recurso
-   * @param {Object} config - Configuración adicional
-   * @returns {Promise<Object>}
+   * @param {Object} config - Configuraciï¿½n adicional
+   * @returns {Observable<Object>}
    */
-  async get(url, config = {}) {
+  get(url, config = {}) {
     return this.request({ ...config, method: 'GET', url });
   }
 
   /**
-   * Realiza una petición POST
+   * Realiza una peticiï¿½n POST
    * @param {string} url - URL del recurso
    * @param {Object} data - Datos a enviar
-   * @param {Object} config - Configuración adicional
-   * @returns {Promise<Object>}
+   * @param {Object} config - Configuraciï¿½n adicional
+   * @returns {Observable<Object>}
    */
-  async post(url, data, config = {}) {
+  post(url, data, config = {}) {
     return this.request({ ...config, method: 'POST', url, data });
   }
 
   /**
-   * Realiza una petición PUT
+   * Realiza una peticiï¿½n PUT
    * @param {string} url - URL del recurso
    * @param {Object} data - Datos a enviar
-   * @param {Object} config - Configuración adicional
-   * @returns {Promise<Object>}
+   * @param {Object} config - Configuraciï¿½n adicional
+   * @returns {Observable<Object>}
    */
-  async put(url, data, config = {}) {
+  put(url, data, config = {}) {
     return this.request({ ...config, method: 'PUT', url, data });
   }
 
   /**
-   * Realiza una petición DELETE
+   * Realiza una peticiï¿½n DELETE
    * @param {string} url - URL del recurso
-   * @param {Object} config - Configuración adicional
-   * @returns {Promise<Object>}
+   * @param {Object} config - Configuraciï¿½n adicional
+   * @returns {Observable<Object>}
    */
-  async delete(url, config = {}) {
+  delete(url, config = {}) {
     return this.request({ ...config, method: 'DELETE', url });
   }
 }

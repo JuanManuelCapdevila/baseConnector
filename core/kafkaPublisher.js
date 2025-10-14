@@ -1,13 +1,15 @@
 // core/kafkaPublisher.js
 const { Kafka, Partitioners, logLevel } = require('kafkajs');
+const { Observable, from, forkJoin, throwError, of } = require('rxjs');
+const { map, switchMap, catchError, tap, mergeMap } = require('rxjs/operators');
 const logger = require('./logger');
 const dataFormatter = require('../utils/dataFormatter');
 const fs = require('fs');
 const path = require('path');
 
 /**
- * Publisher de Kafka responsable de enviar mensajes a los tópicos
- * Soporta envío de mensajes individuales y en batch
+ * Publisher de Kafka responsable de enviar mensajes a los tÃ³picos
+ * Soporta envÃ­o de mensajes individuales y en batch
  */
 class KafkaPublisher {
   constructor() {
@@ -18,7 +20,7 @@ class KafkaPublisher {
   }
 
   /**
-   * Carga la configuración de Kafka desde el archivo kafka.json
+   * Carga la configuraciÃ³n de Kafka desde el archivo kafka.json
    * @returns {Object}
    */
   loadConfig() {
@@ -27,120 +29,127 @@ class KafkaPublisher {
       const rawData = fs.readFileSync(configPath, 'utf-8');
       return JSON.parse(rawData);
     } catch (error) {
-      logger.error(`Error cargando configuración de Kafka: ${error.message}`);
+      logger.error(`Error cargando configuraciÃ³n de Kafka: ${error.message}`);
       throw error;
     }
   }
 
   /**
    * Conecta al broker de Kafka
-   * @returns {Promise<void>}
+   * @returns {Observable<void>}
    */
-  async connect() {
+  connect() {
     if (this.isConnected) {
-      logger.warn('KafkaPublisher ya está conectado');
-      return;
+      logger.warn('KafkaPublisher ya estÃ¡ conectado');
+      return of(undefined);
     }
 
-    try {
-      this.kafka = new Kafka({
-        clientId: this.config.clientId || 'base-connector',
-        brokers: this.config.brokers || ['localhost:9092'],
-        logLevel: logLevel[this.config.logLevel?.toUpperCase() || 'INFO'],
-        retry: {
-          initialRetryTime: this.config.retry?.initialRetryTime || 300,
-          retries: this.config.retry?.retries || 8
+    return of(undefined).pipe(
+      switchMap(() => {
+        try {
+          this.kafka = new Kafka({
+            clientId: this.config.clientId || 'base-connector',
+            brokers: this.config.brokers || ['localhost:9092'],
+            logLevel: logLevel[this.config.logLevel?.toUpperCase() || 'INFO'],
+            retry: {
+              initialRetryTime: this.config.retry?.initialRetryTime || 300,
+              retries: this.config.retry?.retries || 8
+            }
+          });
+
+          const partitioner = this.config.producer?.partitioner === 'default'
+            ? Partitioners.DefaultPartitioner
+            : Partitioners.LegacyPartitioner;
+
+          this.producer = this.kafka.producer({
+            createPartitioner: partitioner,
+            maxInFlightRequests: this.config.producer?.maxInFlightRequests || 5,
+            idempotent: this.config.producer?.idempotent || true,
+            transactionalId: this.config.producer?.transactionalId
+          });
+
+          return from(this.producer.connect()).pipe(
+            tap(() => {
+              this.isConnected = true;
+              logger.info('âœ“ Kafka Producer conectado exitosamente');
+            })
+          );
+        } catch (error) {
+          logger.error(`Error inicializando Kafka: ${error.message}`);
+          return throwError(() => error);
         }
-      });
-
-      // Seleccionar partitioner según configuración
-      // - DefaultPartitioner: Distribuye uniformemente (round-robin cuando no hay key)
-      // - LegacyPartitioner: Usa hash de key (compatible con versiones antiguas)
-      const partitioner = this.config.producer?.partitioner === 'default'
-        ? Partitioners.DefaultPartitioner
-        : Partitioners.LegacyPartitioner;
-
-      this.producer = this.kafka.producer({
-        createPartitioner: partitioner,
-        maxInFlightRequests: this.config.producer?.maxInFlightRequests || 5,
-        idempotent: this.config.producer?.idempotent || true,
-        transactionalId: this.config.producer?.transactionalId
-      });
-
-      await this.producer.connect();
-      this.isConnected = true;
-
-      logger.info(' Kafka Producer conectado exitosamente');
-    } catch (error) {
-      logger.error(`Error conectando a Kafka: ${error.message}`);
-      throw error;
-    }
+      }),
+      catchError(error => {
+        logger.error(`Error conectando a Kafka: ${error.message}`);
+        return throwError(() => error);
+      })
+    );
   }
 
   /**
    * Desconecta del broker de Kafka
-   * @returns {Promise<void>}
+   * @returns {Observable<void>}
    */
-  async disconnect() {
+  disconnect() {
     if (!this.isConnected) {
-      return;
+      return of(undefined);
     }
 
-    try {
-      await this.producer.disconnect();
-      this.isConnected = false;
-      logger.info('Kafka Producer desconectado');
-    } catch (error) {
-      logger.error(`Error desconectando de Kafka: ${error.message}`);
-      throw error;
-    }
+    return from(this.producer.disconnect()).pipe(
+      tap(() => {
+        this.isConnected = false;
+        logger.info('Kafka Producer desconectado');
+      }),
+      catchError(error => {
+        logger.error(`Error desconectando de Kafka: ${error.message}`);
+        return throwError(() => error);
+      })
+    );
   }
 
   /**
-   * Publica un mensaje o batch de mensajes a un tópico de Kafka
-   * @param {string} topic - Nombre del tópico
+   * Publica un mensaje o batch de mensajes a un tÃ³pico de Kafka
+   * @param {string} topic - Nombre del tÃ³pico
    * @param {Object|Array} data - Datos a publicar
    * @param {Object} metadata - Metadata adicional (source, type, etc)
-   * @returns {Promise<void>}
+   * @returns {Observable<void>}
    */
-  async publish(topic, data, metadata = {}) {
+  publish(topic, data, metadata = {}) {
     if (!this.isConnected) {
-      throw new Error('KafkaPublisher no está conectado. Llama a connect() primero.');
+      return throwError(() => new Error('KafkaPublisher no estÃ¡ conectado. Llama a connect() primero.'));
     }
 
-    try {
-      const messages = await this.prepareMessages(data, metadata);
-
-      await this.producer.send({
-        topic,
-        messages
-      });
-
-      logger.debug(`Mensaje publicado a tópico '${topic}': ${messages.length} mensaje(s)`);
-    } catch (error) {
-      logger.error(`Error publicando a Kafka: ${error.message}`);
-      throw error;
-    }
+    return this.prepareMessages(data, metadata).pipe(
+      switchMap(messages =>
+        from(this.producer.send({ topic, messages })).pipe(
+          tap(() => {
+            logger.debug(`Mensaje publicado a tÃ³pico '${topic}': ${messages.length} mensaje(s)`);
+          }),
+          catchError(error => {
+            logger.error(`Error publicando a Kafka: ${error.message}`);
+            return throwError(() => error);
+          })
+        )
+      )
+    );
   }
 
   /**
    * Prepara los mensajes en el formato requerido por Kafka
    * @param {Object|Array} data - Datos a formatear
    * @param {Object} metadata - Metadata adicional
-   * @returns {Promise<Array>}
+   * @returns {Observable<Array>}
    */
-  async prepareMessages(data, metadata) {
+  prepareMessages(data, metadata) {
     const dataArray = Array.isArray(data) ? data : [data];
 
-    const messages = await Promise.all(
-      dataArray.map(async (item) => {
-        const formattedData = await dataFormatter.formatForKafka(
-          item,
-          metadata.source || 'unknown',
-          metadata.type || 'data'
-        );
-
-        return {
+    const observables = dataArray.map(item =>
+      dataFormatter.formatForKafka(
+        item,
+        metadata.source || 'unknown',
+        metadata.type || 'data'
+      ).pipe(
+        map(formattedData => ({
           key: this.generateKey(item, metadata),
           value: JSON.stringify(formattedData),
           headers: {
@@ -148,16 +157,16 @@ class KafkaPublisher {
             type: metadata.type || 'data',
             timestamp: new Date().toISOString()
           }
-        };
-      })
+        }))
+      )
     );
 
-    return messages;
+    return forkJoin(observables);
   }
 
   /**
-   * Genera una clave para el mensaje (útil para particionamiento consistente)
-   * Los mensajes con la misma key van siempre a la misma partición
+   * Genera una clave para el mensaje (Ãºtil para particionamiento consistente)
+   * Los mensajes con la misma key van siempre a la misma particiÃ³n
    * @param {Object} data - Datos del mensaje
    * @param {Object} metadata - Metadata adicional
    * @returns {string}
@@ -176,34 +185,38 @@ class KafkaPublisher {
   }
 
   /**
-   * Publica múltiples mensajes a diferentes tópicos en batch
+   * Publica mÃºltiples mensajes a diferentes tÃ³picos en batch
    * @param {Array<Object>} topicMessages - Array de { topic, messages, metadata }
-   * @returns {Promise<void>}
+   * @returns {Observable<void>}
    */
-  async publishBatch(topicMessages) {
+  publishBatch(topicMessages) {
     if (!this.isConnected) {
-      throw new Error('KafkaPublisher no está conectado. Llama a connect() primero.');
+      return throwError(() => new Error('KafkaPublisher no estÃ¡ conectado. Llama a connect() primero.'));
     }
 
-    try {
-      const batch = await Promise.all(
-        topicMessages.map(async ({ topic, messages, metadata }) => ({
-          topic,
-          messages: await this.prepareMessages(messages, metadata)
-        }))
-      );
+    const batchObservables = topicMessages.map(({ topic, messages, metadata }) =>
+      this.prepareMessages(messages, metadata).pipe(
+        map(preparedMessages => ({ topic, messages: preparedMessages }))
+      )
+    );
 
-      await this.producer.sendBatch({ topicMessages: batch });
-
-      logger.debug(`Batch publicado: ${batch.length} tópico(s)`);
-    } catch (error) {
-      logger.error(`Error publicando batch a Kafka: ${error.message}`);
-      throw error;
-    }
+    return forkJoin(batchObservables).pipe(
+      switchMap(batch =>
+        from(this.producer.sendBatch({ topicMessages: batch })).pipe(
+          tap(() => {
+            logger.debug(`Batch publicado: ${batch.length} tÃ³pico(s)`);
+          }),
+          catchError(error => {
+            logger.error(`Error publicando batch a Kafka: ${error.message}`);
+            return throwError(() => error);
+          })
+        )
+      )
+    );
   }
 
   /**
-   * Verifica el estado de la conexión
+   * Verifica el estado de la conexiÃ³n
    * @returns {boolean}
    */
   isHealthy() {
