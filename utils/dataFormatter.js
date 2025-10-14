@@ -20,7 +20,7 @@ class DataFormatter {
     try {
       const { SchemaRegistry } = require('@kafkajs/confluent-schema-registry');
       this.schemaRegistryClient = new SchemaRegistry({
-        host: process.env.SCHEMA_REGISTRY_URL || 'http://localhost:8081'
+        host: process.env.SCHEMA_REGISTRY_URL || 'http://localhost:8081',
       });
       logger.info(' Schema Registry inicializado');
     } catch (error) {
