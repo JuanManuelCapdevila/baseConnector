@@ -18,5 +18,8 @@
   "bugs": {
     "url": "https://github.com/JuanManuelCapdevila/BaseConnectorJanus/issues"
   },
-  "homepage": "https://github.com/JuanManuelCapdevila/BaseConnectorJanus#readme"
+  "homepage": "https://github.com/JuanManuelCapdevila/BaseConnectorJanus#readme",
+  "dependencies": {
+    "rxjs": "^7.8.2"
+  }
 }
