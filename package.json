@@ -4,6 +4,7 @@
   "description": "conector de fuentes externas para Janus",
   "main": "index.js",
   "scripts": {
+    "start": "node app.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
@@ -20,6 +21,10 @@
   },
   "homepage": "https://github.com/JuanManuelCapdevila/BaseConnectorJanus#readme",
   "dependencies": {
-    "rxjs": "^7.8.2"
+    "@kafkajs/confluent-schema-registry": "^3.3.0",
+    "axios": "^1.6.8",
+    "kafkajs": "^2.2.4",
+    "log4js": "^6.9.1",
+    "rxjs": "^7.8.1"
   }
 }
